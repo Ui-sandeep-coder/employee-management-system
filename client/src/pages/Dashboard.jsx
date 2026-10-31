@@ -1,11 +1,19 @@
 
 import { useEffect, useState } from "react";
-import { CalendarDays, Users, Building2, UserRound } from "lucide-react";
+import {
+  CalendarDays,
+  Users,
+  Building2,
+  UserRound,
+  UserPlus,
+} from "lucide-react";
 
+import AddHRModal from "../components/AddHRModal";
 import DashboardLayout from "../layouts/DashboardLayout";
 import EmployeeTable from "../components/EmployeeTable";
 import AddEmployeeModal from "../components/AddEmployeeModal";
 import DeleteEmployeeModal from "../components/DeleteEmployeeModal";
+import ResetHRPasswordModal from "../components/ResetHRPasswordModal";
 
 import api from "../services/api";
 
@@ -23,7 +31,7 @@ const avatarColors = [
 function formatDate(date) {
   if (!date) return "—";
 
-  const parsedDate = new Date(`${String(date).slice(0, 10)}T00:00:00`);
+  const parsedDate = new Date(date);
 
   if (Number.isNaN(parsedDate.getTime())) return "—";
 
@@ -86,8 +94,20 @@ export default function Dashboard() {
   const [myProfile, setMyProfile] = useState(null);
   const [profileLoading, setProfileLoading] = useState(false);
   const [profileError, setProfileError] = useState("");
-
   const [editingProfile, setEditingProfile] = useState(false);
+
+  const [hrModalOpen, setHrModalOpen] = useState(false);
+  const [creatingHR, setCreatingHR] = useState(false);
+
+  const [hrEmployees, setHrEmployees] = useState([]);
+  const [hrLoading, setHrLoading] = useState(false);
+  const [hrError, setHrError] = useState("");
+  const [hrRefreshKey, setHrRefreshKey] = useState(0);
+
+  const [employeeView, setEmployeeView] = useState("employees");
+
+  const [selectedHR, setSelectedHR] = useState(null);
+  const [resettingHR, setResettingHR] = useState(false);
 
   const role = currentUser?.role?.toLowerCase() || "";
   const canManageEmployees = role === "admin" || role === "hr";
@@ -258,6 +278,47 @@ export default function Dashboard() {
     department,
   ]);
 
+  // HR directory sirf Admin ke liye.
+  useEffect(() => {
+    if (roleLoading || role !== "admin") return;
+
+    let cancelled = false;
+
+    async function fetchHRList() {
+      try {
+        setHrLoading(true);
+        setHrError("");
+
+        const response = await api.get("/users/hr");
+        const records = response.data?.data;
+
+        if (!Array.isArray(records)) {
+          throw new Error("Unexpected HR API response format.");
+        }
+
+        if (!cancelled) {
+          setHrEmployees(records);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setHrError(
+            err.response?.data?.message ||
+              err.message ||
+              "HR list load nahi ho paayi."
+          );
+        }
+      } finally {
+        if (!cancelled) setHrLoading(false);
+      }
+    }
+
+    fetchHRList();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [role, roleLoading, hrRefreshKey]);
+
   function handleSearchChange(value) {
     setSearch(value);
     setCurrentPage(1);
@@ -297,6 +358,7 @@ export default function Dashboard() {
 
     try {
       setDeletingEmployee(true);
+
       await api.delete(`/employees/${employeeToDelete.id}`);
 
       setEmployeeToDelete(null);
@@ -332,7 +394,8 @@ export default function Dashboard() {
     } catch (err) {
       throw new Error(
         err.response?.data?.message ||
-          "Employee update nahi ho paaya. Please try again."
+          "Employee update nahi ho paaya. Please try again.",
+        { cause: err }
       );
     } finally {
       setUpdatingEmployee(false);
@@ -357,55 +420,104 @@ export default function Dashboard() {
     } catch (err) {
       throw new Error(
         err.response?.data?.message ||
-          "Employee create nahi ho paaya. Please try again."
+          "Employee create nahi ho paaya. Please try again.",
+        { cause: err }
       );
     } finally {
       setAddingEmployee(false);
     }
   }
 
-
-async function handleUpdateMyProfile(event) {
-  event.preventDefault();
-
-  if (!myProfile) return;
-
-  const formData = new FormData(event.currentTarget);
-  const full_name = String(formData.get("full_name") || "").trim();
-  const phone = String(formData.get("phone") || "").trim();
-
-  if (!full_name || !phone) {
-    setProfileError("Full Name aur Phone dono required hain.");
-    return;
-  }
+  async function handleResetHRPassword(newPassword) {
+  if (!selectedHR) return;
 
   try {
-    setProfileError("");
+    setResettingHR(true);
 
-    const response = await api.patch(`/employees/${myProfile.id}`, {
-      full_name,
-      phone,
-    });
-
-    const payload = response.data?.data;
-    const updatedEmployee = payload?.employee ?? payload;
-
-    setMyProfile((previous) => ({
-      ...previous,
-      ...updatedEmployee,
-      full_name,
-      phone,
-    }));
-
-    setEditingProfile(false);
-  } catch (err) {
-    setProfileError(
-      err.response?.data?.message ||
-        "Profile update nahi ho paayi. Please try again."
+    const response = await api.patch(
+      `/users/hr/${selectedHR.id}/password`,
+      {
+        password: newPassword,
+      }
     );
+
+    alert(response.data.message || "HR password reset successfully.");
+
+    setSelectedHR(null);
+  } catch (error) {
+    const message =
+      error.response?.data?.message ||
+      "Unable to reset HR password. Please try again.";
+
+    alert(message);
+  } finally {
+    setResettingHR(false);
   }
 }
 
+  async function handleCreateHR(form) {
+    try {
+      setCreatingHR(true);
+
+      await api.post("/users/hr", {
+        full_name: form.name,
+        email: form.email,
+        password: form.password,
+      });
+
+      setHrModalOpen(false);
+      setHrRefreshKey((previous) => previous + 1);
+
+      alert("HR account created successfully!");
+    } catch (err) {
+      throw new Error(
+        err.response?.data?.message || "Please try again.",
+        { cause: err }
+      );
+    } finally {
+      setCreatingHR(false);
+    }
+  }
+
+  async function handleUpdateMyProfile(event) {
+    event.preventDefault();
+
+    if (!myProfile) return;
+
+    const formData = new FormData(event.currentTarget);
+    const full_name = String(formData.get("full_name") || "").trim();
+    const phone = String(formData.get("phone") || "").trim();
+
+    if (!full_name || !phone) {
+      setProfileError("Full Name aur Phone dono required hain.");
+      return;
+    }
+
+    try {
+      setProfileError("");
+
+      const response = await api.patch(`/employees/${myProfile.id}`, {
+        full_name,
+        phone,
+      });
+
+      const payload = response.data?.data;
+      const updatedEmployee = payload?.employee ?? payload;
+
+      setMyProfile((previous) => ({
+        ...previous,
+        ...updatedEmployee,
+        full_name,
+        phone,
+      }));
+
+      setEditingProfile(false);
+    } catch (err) {
+      setProfileError(
+        err.response?.data?.message || "Please try again."
+      );
+    }
+  }
 
   const totalPages = pagination?.totalPages ?? 0;
   const totalEmployees = pagination?.total ?? 0;
@@ -472,7 +584,9 @@ async function handleUpdateMyProfile(event) {
                 {activeNav === "Overview"
                   ? `${role === "admin" ? "Admin" : "HR"} Overview`
                   : activeNav === "Employees"
-                    ? "Employee Directory"
+                    ? employeeView === "hr" && role === "admin"
+                      ? "HR Management"
+                      : "Employee Directory"
                     : "My Profile"}
               </h1>
 
@@ -480,20 +594,38 @@ async function handleUpdateMyProfile(event) {
                 {activeNav === "Overview"
                   ? "Your workforce at a glance."
                   : activeNav === "Employees"
-                    ? "Search, filter and manage employee records."
+                    ? employeeView === "hr" && role === "admin"
+                      ? "View and manage HR accounts."
+                      : "Search, filter and manage employee records."
                     : `Welcome, ${currentUser.full_name || currentUser.name || "Employee"}.`}
               </p>
             </div>
 
+            {/* Page action buttons */}
             {canManageEmployees && activeNav === "Employees" && (
-              <button
-                type="button"
-                onClick={handleOpenAddModal}
-                className="inline-flex items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-700"
-              >
-                <Users size={18} />
-                Add New Employee
-              </button>
+              <div className="flex flex-wrap items-center gap-3">
+                {role === "admin" && employeeView === "hr" && (
+                  <button
+                    type="button"
+                    onClick={() => setHrModalOpen(true)}
+                    className="inline-flex items-center gap-2 rounded-xl border border-indigo-200 bg-white px-4 py-2.5 text-sm font-medium text-indigo-700 hover:bg-indigo-50"
+                  >
+                    <UserPlus size={18} />
+                    Add HR
+                  </button>
+                )}
+
+                {employeeView === "employees" && (
+                  <button
+                    type="button"
+                    onClick={handleOpenAddModal}
+                    className="inline-flex items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-700"
+                  >
+                    <Users size={18} />
+                    Add New Employee
+                  </button>
+                )}
+              </div>
             )}
           </section>
 
@@ -534,9 +666,7 @@ async function handleUpdateMyProfile(event) {
 
                     <div className="rounded-2xl border border-slate-200 bg-white p-6">
                       <div className="flex items-center justify-between">
-                        <p className="text-sm text-slate-500">
-                          Departments
-                        </p>
+                        <p className="text-sm text-slate-500">Departments</p>
                         <Building2 className="text-indigo-600" size={22} />
                       </div>
                       <p className="mt-4 text-3xl font-bold text-slate-900">
@@ -549,9 +679,7 @@ async function handleUpdateMyProfile(event) {
 
                     <div className="rounded-2xl border border-slate-200 bg-white p-6">
                       <div className="flex items-center justify-between">
-                        <p className="text-sm text-slate-500">
-                          Your Account
-                        </p>
+                        <p className="text-sm text-slate-500">Your Account</p>
                         <UserRound className="text-indigo-600" size={22} />
                       </div>
                       <p className="mt-4 text-xl font-bold capitalize text-slate-900">
@@ -591,94 +719,215 @@ async function handleUpdateMyProfile(event) {
           {/* ADMIN / HR: EMPLOYEE DIRECTORY */}
           {canManageEmployees && activeNav === "Employees" && (
             <section>
-              {loading ? (
-                <div className="rounded-2xl border border-slate-200 bg-white p-10 text-center text-sm text-slate-500">
-                  Loading employees...
-                </div>
-              ) : error ? (
-                <div className="rounded-2xl border border-rose-200 bg-white p-6">
-                  <p className="font-semibold text-rose-700">
-                    Employees load nahi ho paaye
-                  </p>
-                  <p className="mt-2 text-sm text-slate-600">{error}</p>
+              {/* Admin-only tabs */}
+              {role === "admin" && (
+                <div className="mb-6 flex gap-3 border-b border-slate-200">
                   <button
                     type="button"
-                    onClick={() => setRefreshKey((previous) => previous + 1)}
-                    className="mt-4 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700"
+                    onClick={() => setEmployeeView("employees")}
+                    className={`border-b-2 px-4 py-3 text-sm font-medium ${
+                      employeeView === "employees"
+                        ? "border-indigo-600 text-indigo-600"
+                        : "border-transparent text-slate-500 hover:text-slate-800"
+                    }`}
                   >
-                    Retry
+                    Employee Management
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setEmployeeView("hr")}
+                    className={`border-b-2 px-4 py-3 text-sm font-medium ${
+                      employeeView === "hr"
+                        ? "border-indigo-600 text-indigo-600"
+                        : "border-transparent text-slate-500 hover:text-slate-800"
+                    }`}
+                  >
+                    HR Management
                   </button>
                 </div>
-              ) : (
-                <>
-                  <EmployeeTable
-                    employees={employees}
-                    onAddClick={handleOpenAddModal}
-                    onEditClick={handleEditClick}
-                    onDelete={handleDeleteClick}
-                    search={search}
-                    onSearchChange={handleSearchChange}
-                    department={department}
-                    onDepartmentChange={handleDepartmentChange}
-                    totalEmployees={totalEmployees}
-                    loading={loading}
-                  />
+              )}
 
-                  <div className="mt-5 flex flex-col gap-4 rounded-xl border border-slate-200 bg-white p-4 sm:flex-row sm:items-center sm:justify-between">
-                    <p className="text-sm text-slate-500">
-                      Showing {startItem}–{endItem} of {totalEmployees} employees
+              {/* Employee Management */}
+              {employeeView === "employees" && (
+                loading ? (
+                  <div className="rounded-2xl border border-slate-200 bg-white p-10 text-center text-sm text-slate-500">
+                    Loading employees...
+                  </div>
+                ) : error ? (
+                  <div className="rounded-2xl border border-rose-200 bg-white p-6">
+                    <p className="font-semibold text-rose-700">
+                      Employees load nahi ho paaye
                     </p>
+                    <p className="mt-2 text-sm text-slate-600">{error}</p>
+                    <button
+                      type="button"
+                      onClick={() => setRefreshKey((previous) => previous + 1)}
+                      className="mt-4 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700"
+                    >
+                      Retry
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <EmployeeTable
+                      employees={employees}
+                      onAddClick={handleOpenAddModal}
+                      onEditClick={handleEditClick}
+                      onDelete={handleDeleteClick}
+                      search={search}
+                      onSearchChange={handleSearchChange}
+                      department={department}
+                      onDepartmentChange={handleDepartmentChange}
+                      totalEmployees={totalEmployees}
+                      loading={loading}
+                    />
 
-                    <div className="flex flex-wrap items-center gap-2">
-                      <button
-                        type="button"
-                        disabled={!pagination?.hasPreviousPage || loading}
-                        onClick={() =>
-                          setCurrentPage((page) => Math.max(1, page - 1))
-                        }
-                        className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
-                      >
-                        Previous
-                      </button>
+                    <div className="mt-5 flex flex-col gap-4 rounded-xl border border-slate-200 bg-white p-4 sm:flex-row sm:items-center sm:justify-between">
+                      <p className="text-sm text-slate-500">
+                        Showing {startItem}–{endItem} of {totalEmployees} employees
+                      </p>
 
-                      {Array.from(
-                        { length: totalPages },
-                        (_, index) => index + 1
-                      ).map((page) => (
+                      <div className="flex flex-wrap items-center gap-2">
                         <button
-                          key={page}
                           type="button"
-                          aria-current={currentPage === page ? "page" : undefined}
-                          disabled={loading}
-                          onClick={() => setCurrentPage(page)}
-                          className={`min-w-10 rounded-lg px-3 py-2 text-sm font-medium disabled:cursor-not-allowed ${
-                            currentPage === page
-                              ? "bg-indigo-600 text-white"
-                              : "border border-slate-200 text-slate-700 hover:bg-slate-50"
-                          }`}
+                          disabled={!pagination?.hasPreviousPage || loading}
+                          onClick={() =>
+                            setCurrentPage((page) => Math.max(1, page - 1))
+                          }
+                          className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
                         >
-                          {page}
+                          Previous
                         </button>
-                      ))}
 
+                        {Array.from(
+                          { length: totalPages },
+                          (_, index) => index + 1
+                        ).map((page) => (
+                          <button
+                            key={page}
+                            type="button"
+                            aria-current={currentPage === page ? "page" : undefined}
+                            disabled={loading}
+                            onClick={() => setCurrentPage(page)}
+                            className={`min-w-10 rounded-lg px-3 py-2 text-sm font-medium disabled:cursor-not-allowed ${
+                              currentPage === page
+                                ? "bg-indigo-600 text-white"
+                                : "border border-slate-200 text-slate-700 hover:bg-slate-50"
+                            }`}
+                          >
+                            {page}
+                          </button>
+                        ))}
+
+                        <button
+                          type="button"
+                          disabled={!pagination?.hasNextPage || loading}
+                          onClick={() => setCurrentPage((page) => page + 1)}
+                          className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                          Next
+                        </button>
+                      </div>
+                    </div>
+                  </>
+                )
+              )}
+
+              {/* HR Management - Admin only */}
+              {role === "admin" && employeeView === "hr" && (
+                <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+                  <div className="border-b border-slate-200 px-6 py-4">
+                    <h2 className="text-lg font-semibold text-slate-900">
+                      HR Management
+                    </h2>
+                    <p className="mt-1 text-sm text-slate-500">
+                      View all HR accounts in your organization.
+                    </p>
+                  </div>
+
+                  {hrLoading ? (
+                    <p className="p-6 text-sm text-slate-500">
+                      Loading HR list...
+                    </p>
+                  ) : hrError ? (
+                    <div className="p-6">
+                      <p className="text-sm text-rose-600">{hrError}</p>
                       <button
                         type="button"
-                        disabled={!pagination?.hasNextPage || loading}
-                        onClick={() => setCurrentPage((page) => page + 1)}
-                        className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
+                        onClick={() =>
+                          setHrRefreshKey((previous) => previous + 1)
+                        }
+                        className="mt-3 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white"
                       >
-                        Next
+                        Retry
                       </button>
                     </div>
-                  </div>
-                </>
+                  ) : hrEmployees.length === 0 ? (
+                    <p className="p-6 text-sm text-slate-500">
+                      No HR accounts found. Click Add HR to create one.
+                    </p>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left text-sm">
+                        <thead className="bg-slate-50 text-slate-500">
+                          <tr>
+                            <th className="px-6 py-4 font-medium">Name</th>
+                            <th className="px-6 py-4 font-medium">Email</th>
+                            <th className="px-6 py-4 font-medium">Role</th>
+                            <th className="px-6 py-4 font-medium">Status</th>
+                            <th className="px-6 py-4 font-medium">Actions</th>
+                            <th className="px-6 py-4 font-medium">Created</th>
+                          </tr>
+                        </thead>
+
+                        <tbody className="divide-y divide-slate-100">
+                          {hrEmployees.map((hr) => (
+                            <tr key={hr.id}>
+                              <td className="px-6 py-4 font-medium text-slate-900">
+                                {hr.full_name}
+                              </td>
+                              <td className="px-6 py-4 text-slate-600">
+                                {hr.email}
+                              </td>
+                              <td className="px-6 py-4 capitalize text-slate-600">
+                                {hr.role}
+                              </td>
+                              <td className="px-6 py-4">
+                                <span
+                                  className={`rounded-full px-3 py-1 text-xs font-medium ${
+                                    hr.is_active
+                                      ? "bg-emerald-50 text-emerald-700"
+                                      : "bg-rose-50 text-rose-700"
+                                  }`}
+                                >
+                                  {hr.is_active ? "Active" : "Inactive"}
+                                </span>
+                              </td>
+                              <td>
+                              <button
+                                type="button"
+                                onClick={() => setSelectedHR(hr)}
+                                className="rounded-lg border border-blue-200 px-3 py-2 text-sm font-medium text-blue-600 hover:bg-blue-50"
+                              >
+                                Reset Password
+                              </button>
+                            </td>
+                              <td className="px-6 py-4 text-slate-600">
+                                {formatDate(hr.created_at)}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
               )}
             </section>
           )}
 
           {/* EMPLOYEE: MY PROFILE */}
-        
-{/* EMPLOYEE: MY PROFILE */}
           {role === "employee" && activeNav === "My Profile" && (
             <section className="rounded-2xl border border-slate-200 bg-white p-6">
               <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
@@ -830,7 +1079,7 @@ async function handleUpdateMyProfile(event) {
             </section>
           )}
 
-          {/* Employee-only role should not show admin/HR content */}
+          {/* Unknown role fallback */}
           {!canManageEmployees && role !== "employee" && (
             <section className="rounded-xl border border-slate-200 bg-white p-6">
               <p className="text-slate-600">
@@ -839,7 +1088,26 @@ async function handleUpdateMyProfile(event) {
             </section>
           )}
 
-          {/* Modals: Admin and HR only */}
+          {/* Add HR modal */}
+          {role === "admin" && hrModalOpen && (
+            <AddHRModal
+              // hr={selectedHR}
+              onClose={() => setHrModalOpen(false)}
+              onAdd={handleCreateHR}
+              isSubmitting={creatingHR}
+            />
+          )}
+          {/* Reset HR Password modal */}
+          {role === "admin" && selectedHR && (
+            <ResetHRPasswordModal
+              hr={selectedHR}
+              onClose={() => setSelectedHR(null)}
+              onReset={handleResetHRPassword}
+              isSubmitting={resettingHR}
+            />
+          )}
+
+          {/* Add/Edit Employee modal */}
           {canManageEmployees && modalOpen && (
             <AddEmployeeModal
               onClose={handleCloseModal}
@@ -850,6 +1118,7 @@ async function handleUpdateMyProfile(event) {
             />
           )}
 
+          {/* Delete Employee modal */}
           {canManageEmployees && employeeToDelete && (
             <DeleteEmployeeModal
               employee={employeeToDelete}

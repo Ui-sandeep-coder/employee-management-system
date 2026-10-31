@@ -2,6 +2,7 @@ const express = require("express");
 
 const {
   createHR,
+  getHRList,
   createEmployee,
   resetUserPassword
 } = require("../controllers/user.controller");
@@ -19,6 +20,14 @@ router.post(
   createHR
 );
 
+// Only Admin can view HR accounts
+router.get(
+  "/hr",
+  authenticateToken,
+  requireRole("admin"),
+  getHRList
+);
+
 // Admin and HR can create Employee accounts
 router.post(
   "/employee",
@@ -27,9 +36,9 @@ router.post(
   createEmployee
 );
 
-// Only Admin can reset a user's password
+// Only Admin can reset an HR password
 router.patch(
-  "/:id/password",
+  "/hr/:id/password",
   authenticateToken,
   requireRole("admin"),
   resetUserPassword

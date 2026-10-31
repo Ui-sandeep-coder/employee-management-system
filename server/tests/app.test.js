@@ -458,7 +458,7 @@ test("HR cannot create another HR account", async () => {
 // 28. HR cannot reset a user's password
 test("HR cannot reset a user's password", async () => {
   const response = await request(app)
-    .patch("/api/v1/users/1/password")
+    .patch("/api/v1/users/hr/1/password")
     .set("Authorization", hrAuthHeader)
     .send({
       password: "AnotherStrongPassword123!",
@@ -490,7 +490,7 @@ test("Admin HR creation rejects a short password", async () => {
 // 30. Admin gets 404 resetting a non-existent user's password
 test("Admin gets 404 when resetting a non-existent user's password", async () => {
   const response = await request(app)
-    .patch("/api/v1/users/999999/password")
+    .patch("/api/v1/users/hr/999999/password")
     .set("Authorization", authHeader)
     .send({
       password: "AnotherStrongPassword123!",
@@ -498,7 +498,7 @@ test("Admin gets 404 when resetting a non-existent user's password", async () =>
 
   assert.equal(response.statusCode, 404);
   assert.equal(response.body.status, "error");
-  assert.equal(response.body.message, "User not found");
+  assert.equal(response.body.message, "HR account not found");
 });
 
 // 31. Admin creates an HR account successfully
@@ -640,7 +640,7 @@ test("Admin resets an HR password successfully", async () => {
   );
 
   const response = await request(app)
-    .patch(`/api/v1/users/${createdHRUserId}/password`)
+    .patch(`/api/v1/users/hr/${createdHRUserId}/password`)
     .set("Authorization", authHeader)
     .send({
       password: resetHRPassword,
@@ -650,7 +650,7 @@ test("Admin resets an HR password successfully", async () => {
   assert.equal(response.body.status, "success");
   assert.equal(
     response.body.message,
-    "Password reset successfully"
+    "HR password reset successfully"
   );
 
   assert.equal(Number(response.body.data.id), Number(createdHRUserId));

@@ -78,6 +78,35 @@ async function createHR(req, res, next) {
   }
 }
 
+
+// Get all HR accounts (Admin only)
+async function getHRList(req, res, next) {
+  try {
+    const result = await pool.query(
+      `SELECT
+         id,
+         full_name,
+         email,
+         role,
+         is_active,
+         created_at
+       FROM users
+       WHERE role = 'hr'
+       ORDER BY created_at DESC`
+    );
+
+    return res.status(200).json({
+      status: "success",
+      message: "HR list fetched successfully",
+      count: result.rows.length,
+      data: result.rows,
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+
 // Create an Employee login account and profile together
 async function createEmployee(req, res, next) {
   let client;
@@ -242,15 +271,15 @@ async function resetUserPassword(req, res, next) {
     const userId = Number(req.params.id);
     const { password } = req.body;
 
-    // Step 1: Validate user ID
+    // Validate user ID
     if (!Number.isInteger(userId) || userId <= 0) {
       return res.status(400).json({
         status: "error",
-        message: "Invalid user ID",
+        message: "Invalid HR ID",
       });
     }
 
-    // Step 2: Validate new password
+    // Validate new password
     if (typeof password !== "string" || password.length < 12) {
       return res.status(400).json({
         status: "error",
@@ -258,14 +287,14 @@ async function resetUserPassword(req, res, next) {
       });
     }
 
-    // Step 3: Hash the new password
+    // Hash the new password
     const passwordHash = await bcrypt.hash(password, 12);
 
-    // Step 4: Update the existing user's password
+    // Update password only for an HR account
     const result = await pool.query(
       `UPDATE users
        SET password_hash = $1
-       WHERE id = $2
+       WHERE id = $2 AND role = 'hr'
        RETURNING id, full_name, email, role, is_active`,
       [passwordHash, userId]
     );
@@ -273,13 +302,13 @@ async function resetUserPassword(req, res, next) {
     if (result.rows.length === 0) {
       return res.status(404).json({
         status: "error",
-        message: "User not found",
+        message: "HR account not found",
       });
     }
 
     return res.status(200).json({
       status: "success",
-      message: "Password reset successfully",
+      message: "HR password reset successfully",
       data: result.rows[0],
     });
   } catch (error) {
@@ -290,6 +319,7 @@ async function resetUserPassword(req, res, next) {
 
 module.exports = {
   createHR,
+  getHRList,
   createEmployee,
-  resetUserPassword,
+  resetUserPassword
 };
