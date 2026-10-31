@@ -6,6 +6,9 @@ info:
   description: API documentation for the Employee Management System
 
 servers:
+  - url: https://employee-management-system-0gqe.onrender.com
+    description: Production server
+
   - url: http://localhost:3000
     description: Local development server
 
